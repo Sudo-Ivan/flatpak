@@ -49,6 +49,7 @@
 #endif
 
 #include <glib/gi18n-lib.h>
+#include <glib/gstdio.h>
 
 #include <gio/gio.h>
 #include "libglnx.h"
@@ -405,6 +406,42 @@ flatpak_run_add_environment_args (FlatpakBwrap    *bwrap,
               if (g_file_test (nvidia_dev, G_FILE_TEST_EXISTS))
                 flatpak_bwrap_add_args (bwrap, "--dev-bind", nvidia_dev, nvidia_dev, NULL);
             }
+        }
+
+      if (context->devices & FLATPAK_CONTEXT_DEVICE_INPUT)
+        {
+          const gchar *sysfs_path = "/sys/class/hidraw";
+          g_autoptr(GDir) sysfs_dir = NULL;
+          g_autoptr(GError) dir_error = NULL;
+
+          g_debug ("Allowing input device access");
+
+          /* Enumerate hidraw device nodes by checking /dev/ for names that
+           * match the symlink names in /sys/class/hidraw/ */
+          sysfs_dir = g_dir_open (sysfs_path, 0, &dir_error);
+          if (sysfs_dir == NULL)
+              g_warning ("Cannot read %s: %s", sysfs_path, dir_error->message);
+          else
+            {
+              gchar dev_path[sizeof ("/dev/hidraw") + 3];
+              const gchar *name;
+              while ((name = g_dir_read_name (sysfs_dir)) != NULL)
+                {
+                  if (sizeof ("/dev/") + strlen (name) > sizeof (dev_path))
+                    {
+                      g_warning ("Skipping unexpectedly long hidraw name: %s", name);
+                      continue;
+                    }
+                  g_snprintf (dev_path, sizeof (dev_path), "/dev/%s", name);
+                  if (g_access (dev_path, R_OK) == 0)
+                      flatpak_bwrap_add_args (bwrap, "--dev-bind", dev_path, dev_path, NULL);
+                }
+            }
+
+          if (g_file_test ("/dev/uinput", G_FILE_TEST_EXISTS))
+              flatpak_bwrap_add_args (bwrap, "--dev-bind", "/dev/uinput", "/dev/uinput", NULL);
+          if (g_file_test ("/dev/input", G_FILE_TEST_IS_DIR))
+              flatpak_bwrap_add_args (bwrap, "--dev-bind", "/dev/input", "/dev/input", NULL);
         }
 
       if (context->devices & FLATPAK_CONTEXT_DEVICE_KVM)
